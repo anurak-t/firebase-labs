@@ -1,0 +1,118 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function requiredUserFields() {
+      return request.resource.data.keys().hasOnly([
+        'uid',
+        'displayName',
+        'email',
+        'photoURL',
+        'createdAt',
+        'updatedAt'
+      ]);
+    }
+
+    function validUserProfile(uid) {
+      return request.resource.data.uid == uid
+        && request.resource.data.displayName is string
+        && request.resource.data.email is string
+        && request.resource.data.photoURL is string;
+    }
+
+    function validPostCreate() {
+      return request.resource.data.keys().hasOnly([
+        'authorId',
+        'authorName',
+        'authorPhotoURL',
+        'text',
+        'createdAt',
+        'updatedAt',
+        'visibility'
+      ])
+      && request.resource.data.authorId == request.auth.uid
+      && request.resource.data.authorName is string
+      && request.resource.data.authorPhotoURL is string
+      && request.resource.data.text is string
+      && request.resource.data.text.size() > 0
+      && request.resource.data.text.size() <= 1000
+      && request.resource.data.visibility == 'public';
+    }
+
+    function validPostUpdate() {
+      return request.resource.data.keys().hasOnly([
+          'authorId',
+          'authorName',
+          'authorPhotoURL',
+          'text',
+          'createdAt',
+          'updatedAt',
+          'visibility'
+        ])
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.authorName == resource.data.authorName
+        && request.resource.data.authorPhotoURL == resource.data.authorPhotoURL
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.visibility == resource.data.visibility
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 1000;
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create: if isOwner(uid) && requiredUserFields() && validUserProfile(uid);
+      allow update: if isOwner(uid) && requiredUserFields() && validUserProfile(uid)
+        && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && validPostCreate();
+      allow update: if signedIn()
+        && resource.data.authorId == request.auth.uid
+        && validPostUpdate();
+      allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+
+      match /comments/{commentId} {
+        allow read: if signedIn();
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly([
+            'authorId',
+            'authorName',
+            'authorPhotoURL',
+            'text',
+            'createdAt'
+          ])
+          && request.resource.data.authorId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 500;
+        allow update: if false;
+        allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
+      }
+
+      match /likes/{uid} {
+        allow read: if signedIn();
+        allow create: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+          && request.resource.data.uid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isOwner(uid);
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
